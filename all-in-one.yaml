@@ -1,0 +1,178 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: git-workspace-pvc
+  namespace: tprasojo-lyrid-dev
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: gp2
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: clean-workspace-task
+  namespace: tprasojo-lyrid-dev
+spec:
+  workspaces:
+    - name: output
+  steps:
+    - name: clean
+      image: registry.access.redhat.com/ubi9/ubi-minimal
+      script: |
+        echo "🧹 Cleaning workspace..."
+        rm -rf $(workspaces.output.path)/*
+        rm -rf $(workspaces.output.path)/.[!.]*
+        rm -rf $(workspaces.output.path)/..?*
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: git-clone-task
+  namespace: tprasojo-lyrid-dev
+spec:
+  params:
+    - name: repo-url
+      type: string
+  workspaces:
+    - name: output
+  steps:
+    - name: clone
+      image: alpine/git
+      script: |
+        set -e
+        echo "📥 Cloning repository from $(params.repo-url) ..."
+        git clone --branch main $(params.repo-url) $(workspaces.output.path)/repo
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: list-files-task
+  namespace: tprasojo-lyrid-dev
+spec:
+  workspaces:
+    - name: source
+  steps:
+    - name: list
+      image: registry.access.redhat.com/ubi9/ubi-minimal
+      script: |
+        echo "📂 Listing cloned files..."
+        ls -A $(workspaces.source.path)/repo
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: git-clone-pipeline
+  namespace: tprasojo-lyrid-dev
+spec:
+  params:
+    - name: repo-url
+      type: string
+      default: "https://github.com/teguhbudhi13/nginx-openshift-ready.git"
+  workspaces:
+    - name: shared-data
+  tasks:
+    - name: clean
+      taskRef:
+        name: clean-workspace-task
+      workspaces:
+        - name: output
+          workspace: shared-data
+    - name: clone
+      runAfter:
+        - clean
+      taskRef:
+        name: git-clone-task
+      params:
+        - name: repo-url
+          value: "$(params.repo-url)"
+      workspaces:
+        - name: output
+          workspace: shared-data
+    - name: list
+      runAfter:
+        - clone
+      taskRef:
+        name: list-files-task
+      workspaces:
+        - name: source
+          workspace: shared-data
+---
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: git-clone-pipelinerun
+  namespace: tprasojo-lyrid-dev
+spec:
+  pipelineRef:
+    name: git-clone-pipeline
+  workspaces:
+    - name: shared-data
+      persistentVolumeClaim:
+        claimName: git-workspace-pvc
+
+---
+
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: github-push-binding
+  namespace: tprasojo-lyrid-dev
+spec:
+  params:
+    - name: gitrepositoryurl
+      value: $(body.repository.clone_url)
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: github-push-template
+  namespace: tprasojo-lyrid-dev
+spec:
+  params:
+    - name: gitrepositoryurl
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1
+      kind: PipelineRun
+      metadata:
+        generateName: git-clone-run-
+        namespace: tprasojo-lyrid-dev
+      spec:
+        pipelineRef:
+          name: git-clone-pipeline
+        workspaces:
+          - name: shared-data
+            persistentVolumeClaim:
+              claimName: git-workspace-pvc
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: github-push-listener
+  namespace: tprasojo-lyrid-dev
+spec:
+  serviceAccountName: pipeline
+  triggers:
+    - name: github-push-trigger
+      bindings:
+        - ref: github-push-binding
+      template:
+        ref: github-push-template
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: github-push-route
+  namespace: tprasojo-lyrid-dev
+spec:
+  to:
+    kind: Service
+    name: el-github-push-listener
+  port:
+    targetPort: http-listener
+  tls:
+    termination: edge
