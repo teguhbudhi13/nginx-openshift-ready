@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-tebe
+  namespace: tebe
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-tebe
+  template:
+    metadata:
+      labels:
+        app: nginx-tebe
+    spec:
+      containers:
+        - name: nginx
+          image: image-registry.openshift-image-registry.svc:5000/tebe/nginx-tebe:latest
+          ports:
+            - containerPort: 8080
