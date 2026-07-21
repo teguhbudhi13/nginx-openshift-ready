@@ -16,4 +16,4 @@ RUN chmod -R 755 /usr/share/nginx && \
 
 EXPOSE 8080
 
-CMD ["nginx", "-g", "daemon off;", "-c", "/etc/nginx/nginx.conf"]
+CMD ["nginx", "-g", "daemon off;"]
