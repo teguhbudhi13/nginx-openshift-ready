@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nginx-tebe
-  namespace: tebe
+  # Notice: namespace is omitted here so Argo CD controls the target namespace
 spec:
   replicas: 1
   selector:
@@ -11,7 +11,7 @@ spec:
   template:
     metadata:
       annotations:
-        sidecar.istio.io/inject: "false"  # <--- Disables Istio sidecar injection if present
+        sidecar.istio.io/inject: "false"
       labels:
         app: nginx-tebe
     spec:
